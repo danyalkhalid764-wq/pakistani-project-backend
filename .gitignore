@@ -88,6 +88,6 @@ tmp/
 temp/
 *.tmp
 
-
-
+# Frontend files (exclude when pushing backend)
+frontend/
 
