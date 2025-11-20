@@ -62,6 +62,7 @@ class VoiceGenerateResponse(BaseModel):
     limit_reached: bool = False
     tokens_used: Optional[int] = None
     tokens_remaining: Optional[int] = None
+    error: Optional[dict] = None  # Error details for failed requests
 
 
 # =======================
