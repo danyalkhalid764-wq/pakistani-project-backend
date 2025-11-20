@@ -1,0 +1,230 @@
+import sys
+import os
+import shutil
+
+# Force output immediately
+sys.stdout.flush()
+sys.stderr.flush()
+
+# Configure ffmpeg PATH before any imports that might use it (pydub, moviepy)
+# This ensures ffmpeg is available when pydub/moviepy check for it at import time
+try:
+    import imageio_ffmpeg
+    ffmpeg_binary = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_dir = os.path.dirname(ffmpeg_binary)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+    print(f"✅ Configured ffmpeg from imageio-ffmpeg: {ffmpeg_binary}", flush=True)
+except Exception:
+    # Fallback to system ffmpeg
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        ffmpeg_dir = os.path.dirname(ffmpeg_path)
+        if ffmpeg_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        print(f"✅ Configured system ffmpeg: {ffmpeg_path}", flush=True)
+    else:
+        print("⚠️ ffmpeg not found in PATH - video/audio features may not work", flush=True)
+
+print("=" * 50, flush=True)
+print("Starting FastAPI application...", flush=True)
+print("=" * 50, flush=True)
+
+try:
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.middleware.cors import CORSMiddleware
+    print("✅ FastAPI imported", flush=True)
+    
+    from database import engine, Base
+    print("✅ Database imported", flush=True)
+    
+    from routes import auth, tts, payments, video
+    print("✅ Routes imported", flush=True)
+    
+    # Check TTS service configuration on startup
+    print("=" * 50, flush=True)
+    print("[STARTUP] Checking TTS Service Configuration...", flush=True)
+    from services.lamonfox_service import LamonfoxService, LAMONFOX_API_KEY
+    tts_service_check = LamonfoxService()
+    if tts_service_check.api_key:
+        key_length = len(tts_service_check.api_key)
+        key_preview = f"{tts_service_check.api_key[:10]}...{tts_service_check.api_key[-5:]}" if key_length > 15 else f"{tts_service_check.api_key[:5]}***"
+        print(f"[STARTUP] ✅ TTS Service Ready", flush=True)
+        print(f"[STARTUP] API Key Preview: {key_preview}", flush=True)
+        print(f"[STARTUP] API Key Length: {key_length} characters", flush=True)
+        print(f"[STARTUP] API Key First 6 chars: {tts_service_check.api_key[:6]}", flush=True)
+        print(f"[STARTUP] API Key Last 6 chars: {tts_service_check.api_key[-6:]}", flush=True)
+    else:
+        print(f"[STARTUP] ❌ TTS Service NOT Ready - API key missing", flush=True)
+        print(f"[STARTUP] ⚠️  Set LAMONFOX_API_KEY environment variable to enable TTS", flush=True)
+    print("=" * 50, flush=True)
+    
+    print("DEBUG_DATABASE_URL:", os.getenv("DATABASE_URL"), flush=True)
+    print("=" * 50, flush=True)
+except Exception as e:
+    print(f"❌ Import error: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+# Don't create tables here - let Alembic handle all migrations
+# Base.metadata.create_all() can conflict with Alembic migrations
+print("Database tables will be managed by Alembic migrations")
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="MyAIStudio API",
+    description="Text-to-Speech API with Lamonfox (Lemonfox.ai) integration",
+    version="1.0.0"
+)
+
+# ✅ FIXED: Proper CORS setup for both local + production
+# CORS middleware must be added BEFORE routers to handle OPTIONS preflight requests
+# CORS configuration - allow Netlify domains and local development
+from config import settings
+cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",  # Vite dev server
+    "https://picvoice3lab.netlify.app",         # NEW: current deployed frontend
+    "https://picvoice3labc.netlify.app",         # old deployed frontend
+    "https://pakistani-project-frontend.netlify.app",  # backup / test domain
+    "https://startling-cobbler-7dd158.netlify.app",  # previous Netlify domain
+]
+# Add any additional origins from config
+if hasattr(settings, 'ALLOWED_ORIGINS'):
+    cors_origins.extend([origin for origin in settings.ALLOWED_ORIGINS if origin not in cors_origins])
+
+# CORS middleware configuration
+# This MUST be added before routers to handle OPTIONS preflight requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+    allow_headers=["*"],  # Allow all headers - "*" is more permissive
+    expose_headers=["*"],
+    max_age=3600,
+)
+
+# Global exception handler to ensure CORS headers are included in error responses
+# Note: HTTPException is already handled by FastAPI with CORS headers
+# This handler catches unexpected exceptions
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError, HTTPException
+from fastapi import Request, status
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to ensure CORS headers are included in all error responses"""
+    # Don't handle HTTPException - FastAPI already handles it with CORS
+    if isinstance(exc, HTTPException):
+        raise exc
+    
+    import traceback
+    error_detail = str(exc)
+    traceback_str = traceback.format_exc()
+    print(f"❌ Global exception handler: {error_detail}", flush=True)
+    print(f"Traceback: {traceback_str}", flush=True)
+    
+    # Return JSON response with CORS headers (middleware will add them)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Internal server error",
+            "error": error_detail
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with CORS headers"""
+    errors = exc.errors()
+    # Format validation errors for better readability
+    error_messages = []
+    for error in errors:
+        field = ".".join(str(loc) for loc in error.get("loc", []))
+        message = error.get("msg", "Validation error")
+        error_messages.append(f"{field}: {message}")
+    
+    print(f"⚠️ Validation error: {error_messages}", flush=True)
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "detail": error_messages if error_messages else exc.errors(),
+            "errors": exc.errors()
+        }
+    )
+
+# Include routers
+app.include_router(auth.router, prefix="/auth", tags=["authentication"])
+app.include_router(tts.router, prefix="/api", tags=["text-to-speech"])
+app.include_router(payments.router, prefix="/api/payment", tags=["payments"])
+app.include_router(video.router, prefix="/api/video", tags=["video"])
+
+# ✅ Static files for generated videos
+# Use app directory for generated_videos (writable location on Railway)
+videos_dir = os.path.join(os.path.dirname(__file__), "generated_videos")
+os.makedirs(videos_dir, exist_ok=True)
+print(f"Video files directory: {os.path.abspath(videos_dir)}")
+
+# Direct route handler to serve video files (more reliable than mount)
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+
+@app.get("/static/videos/{filename}")
+async def serve_video(filename: str):
+    """
+    SIMPLE: Serve video files directly from disk.
+    This is the ONLY way videos are served - no cache, no streaming complexity.
+    """
+    from fastapi.responses import FileResponse
+    
+    # Remove query parameters if present
+    filename = filename.split('?')[0]
+    file_path = os.path.join(videos_dir, filename)
+    
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        file_size = os.path.getsize(file_path)
+        print(f"✅ Serving video: {filename} ({file_size} bytes)", flush=True)
+        
+        # Use FileResponse - FastAPI handles range requests automatically
+        return FileResponse(
+            file_path,
+            media_type="video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+    
+    print(f"❌ Video not found: {filename}", flush=True)
+    raise HTTPException(status_code=404, detail=f"Video file not found: {filename}")
+
+@app.get("/")
+async def root():
+    return {"message": "MyAIStudio API is running"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+# Print server startup info
+print("=" * 50)
+print("✅ FastAPI application initialized successfully!")
+print("Routes registered:")
+print("  - /auth/* (authentication)")
+print("  - /api/* (text-to-speech)")
+print("  - /api/payment/* (payments)")
+print("  - /api/video/* (video generation)")
+print("  - /static/videos/* (video files)")
+print("=" * 50)
+print("🚀 Starting Uvicorn server...")
+print("=" * 50)
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["python310", "pip", "ffmpeg"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "bash -c 'python init_alembic_version.py && alembic upgrade head && python main.py'"
+
