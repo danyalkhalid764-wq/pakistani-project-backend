@@ -5,14 +5,14 @@ Run this to create the database tables
 """
 
 from database import engine, Base
-from models import User, VoiceHistory, Payment
+from models import User, VoiceHistory, Payment, GeneratedVideo, Admin
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 def init_database():
-    """Create all database tables"""
+    """Create all database tables and initialize default admin"""
     print("🔄 Creating database tables...")
     
     try:
@@ -25,6 +25,17 @@ def init_database():
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = SessionLocal()
         
+        # Initialize default admin user if it doesn't exist
+        default_admin = db.query(Admin).filter(Admin.name == "Sohaib").first()
+        if not default_admin:
+            print("📝 Creating default admin user...")
+            admin = Admin(name="Sohaib", password="123456")
+            db.add(admin)
+            db.commit()
+            print("✅ Default admin created: Name='Sohaib', Password='123456'")
+        else:
+            print("ℹ️  Default admin already exists")
+        
         # Test query
         user_count = db.query(User).count()
         print(f"📊 Database connected! Current users: {user_count}")
@@ -34,6 +45,8 @@ def init_database():
         
     except Exception as e:
         print(f"❌ Error creating database: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":

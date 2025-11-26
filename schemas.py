@@ -48,6 +48,23 @@ class TokenData(BaseModel):
 
 
 # =======================
+# Admin Login Schema
+# =======================
+class AdminLogin(BaseModel):
+    name: str
+    password: str
+
+class AdminLoginResponse(BaseModel):
+    success: bool
+    message: str
+
+class AdminUpdateCredentials(BaseModel):
+    current_password: str
+    name: Optional[str] = None
+    password: Optional[str] = None
+
+
+# =======================
 # Voice Generation Schemas
 # =======================
 class VoiceGenerateRequest(BaseModel):
@@ -81,6 +98,10 @@ class PaymentCallback(BaseModel):
     transaction_id: str
     status: str
     amount: float
+
+class SubscriptionRequest(BaseModel):
+    transaction_id: str  # Binance transaction ID
+    amount: float  # Should be 500
 
 
 # =======================

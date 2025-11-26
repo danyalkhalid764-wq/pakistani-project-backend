@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, Payment
-from schemas import PaymentCreateRequest, PaymentCreateResponse, PaymentCallback
+from schemas import PaymentCreateRequest, PaymentCreateResponse, PaymentCallback, SubscriptionRequest
 from services.easypaisa_service import EasypaisaService
 from routes.auth import get_current_user
 
@@ -134,6 +134,64 @@ async def trigger_upgrade(
     # Create payment request
     request = PaymentCreateRequest(plan=plan, amount=PLAN_PRICES[plan])
     return await create_payment(request, current_user, db)
+
+@router.post("/subscription-request")
+async def create_subscription_request(
+    request: SubscriptionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create subscription request - saves payment info and sets requested flag"""
+    try:
+        # Check if user already has requested
+        if hasattr(current_user, 'requested') and current_user.requested:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already submitted a subscription request"
+            )
+        
+        # Check if user already has paid plan
+        if current_user.plan == "Paid":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You already have a paid plan"
+            )
+        
+        # Validate amount (should be 500)
+        if request.amount != 500:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid amount. Please pay exactly 500"
+            )
+        
+        # Create payment record
+        payment = Payment(
+            user_id=current_user.id,
+            amount=request.amount,
+            status="pending",
+            transaction_id=request.transaction_id
+        )
+        db.add(payment)
+        
+        # Set requested flag to True
+        current_user.requested = True
+        
+        db.commit()
+        db.refresh(payment)
+        
+        return {
+            "success": True,
+            "message": "Subscription request submitted successfully. Admin will review your payment and upgrade your plan."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error creating subscription request: {str(e)}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create subscription request: {str(e)}"
+        )
 
 
 

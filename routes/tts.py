@@ -43,6 +43,35 @@ async def generate_voice(
             db.commit()
             logger.info(f"[COUNTER RESET] Daily counters reset successfully")
 
+        # Ensure daily_voice_count is initialized
+        if current_user.daily_voice_count is None:
+            current_user.daily_voice_count = 0
+
+        # Check daily voice generation limits
+        MAX_DAILY_VOICES = 2 if current_user.plan == "Free" else 5
+        logger.info(f"[DAILY VOICE LIMIT] Plan: {current_user.plan}, Max daily voices: {MAX_DAILY_VOICES}, Current count: {current_user.daily_voice_count}")
+        
+        if current_user.daily_voice_count >= MAX_DAILY_VOICES:
+            logger.warning(f"[LIMIT EXCEEDED] Daily voice limit reached: {current_user.daily_voice_count}/{MAX_DAILY_VOICES}")
+            error_detail = {
+                "message": f"Daily voice generation limit reached. You can generate up to {MAX_DAILY_VOICES} voices per day. You have already generated {current_user.daily_voice_count} voices today.",
+                "error_type": "DAILY_VOICE_LIMIT_EXCEEDED",
+                "status_code": 429,
+                "details": f"You have reached your daily limit of {MAX_DAILY_VOICES} voice generations. Please try again tomorrow.",
+                "timestamp": datetime.now().isoformat(),
+                "daily_count": current_user.daily_voice_count,
+                "max_daily_voices": MAX_DAILY_VOICES
+            }
+            return VoiceGenerateResponse(
+                success=False,
+                message=error_detail["message"],
+                error=error_detail,
+                daily_count=current_user.daily_voice_count,
+                limit_reached=True,
+                tokens_used=current_user.total_tokens_used or 0,
+                tokens_remaining=0
+            )
+
         # Count words in the text (treat each word as 1 token)
         word_count = len(request.text.split())
         logger.info(f"[TOKEN COUNT] Word count: {word_count}")
@@ -238,6 +267,9 @@ async def generate_voice(
                 current_user.total_tokens_used = 0
             current_user.total_tokens_used += word_count
             
+            # Increment daily voice count
+            current_user.daily_voice_count += 1
+            
             db.commit()
             db.refresh(voice_entry)
             
@@ -245,7 +277,7 @@ async def generate_voice(
             voice_entry.audio_url = f"generated_audio_{voice_entry.id}.mp3"
             db.commit()
             logger.info(f"[DATABASE] ✅ Voice history saved, ID: {voice_entry.id}, URL: {voice_entry.audio_url}")
-            logger.info(f"[TOKEN UPDATE] Total tokens: {current_user.total_tokens_used}")
+            logger.info(f"[TOKEN UPDATE] Total tokens: {current_user.total_tokens_used}, Daily voice count: {current_user.daily_voice_count}")
             
             remaining_tokens = 800 - current_user.total_tokens_used
             logger.info(f"[REQUEST SUCCESS] Voice generated successfully for Paid user")

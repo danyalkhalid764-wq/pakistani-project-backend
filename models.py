@@ -20,6 +20,9 @@ class User(Base):
     
     # Token tracking for TTS generation
     total_tokens_used = Column(Integer, nullable=True, default=0, server_default="0")
+    
+    # Requested field
+    requested = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     voice_history = relationship("VoiceHistory", back_populates="user")
@@ -66,3 +69,12 @@ class GeneratedVideo(Base):
 
     # Relationship
     user = relationship("User", back_populates="generated_videos")
+
+
+# ✅ NEW MODEL: Admin
+class Admin(Base):
+    __tablename__ = "admins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    password = Column(String, nullable=False)

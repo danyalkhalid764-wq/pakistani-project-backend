@@ -36,8 +36,12 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     print("✅ FastAPI imported", flush=True)
     
-    from database import engine, Base
+    from database import engine, Base, SessionLocal
     print("✅ Database imported", flush=True)
+    
+    from models import User, VoiceHistory, Payment, GeneratedVideo, Admin
+    from utils.jwt_handler import get_password_hash
+    print("✅ Models imported", flush=True)
     
     from routes import auth, tts, payments, video
     print("✅ Routes imported", flush=True)
@@ -60,6 +64,13 @@ try:
         print(f"[STARTUP] ⚠️  Set LAMONFOX_API_KEY environment variable to enable TTS", flush=True)
     print("=" * 50, flush=True)
     
+    # Admin credentials are hardcoded (not in database)
+    print("[STARTUP] Admin login configured with hardcoded credentials", flush=True)
+    print("[STARTUP]   - Admin Name: Sohaib", flush=True)
+    print("[STARTUP]   - Admin Password: 123456", flush=True)
+    print("[STARTUP]   - Admin Email: admin@myaistudio.com", flush=True)
+    print("[STARTUP] ✅ Admin login ready (no database user required)", flush=True)
+    
     print("DEBUG_DATABASE_URL:", os.getenv("DATABASE_URL"), flush=True)
     print("=" * 50, flush=True)
 except Exception as e:
@@ -68,9 +79,37 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
-# Don't create tables here - let Alembic handle all migrations
-# Base.metadata.create_all() can conflict with Alembic migrations
-print("Database tables will be managed by Alembic migrations")
+# Create all database tables at startup (SQLite will recreate if deleted)
+# This ensures the database schema is always up to date with the models
+print("🔄 Creating database tables...", flush=True)
+try:
+    # Import all models to ensure they're registered with Base.metadata
+    from models import User, VoiceHistory, Payment, GeneratedVideo, Admin
+    
+    # Create all tables (only creates if they don't exist, safe for existing databases)
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created/verified successfully!", flush=True)
+    
+    # Initialize default admin user if it doesn't exist
+    db = SessionLocal()
+    try:
+        default_admin = db.query(Admin).filter(Admin.name == "Sohaib").first()
+        if not default_admin:
+            print("📝 Creating default admin user...", flush=True)
+            admin = Admin(name="Sohaib", password="123456")
+            db.add(admin)
+            db.commit()
+            print("✅ Default admin created: Name='Sohaib', Password='123456'", flush=True)
+        
+        user_count = db.query(User).count()
+        print(f"📊 Database connected! Current users: {user_count}", flush=True)
+    finally:
+        db.close()
+except Exception as e:
+    print(f"❌ Error creating database tables: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
+    # Don't exit - let the server start and show the error
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -78,6 +117,30 @@ app = FastAPI(
     description="Text-to-Speech API with Lamonfox (Lemonfox.ai) integration",
     version="1.0.0"
 )
+
+# Startup event to ensure database tables exist
+@app.on_event("startup")
+async def startup_db_check():
+    """Ensure database tables exist on startup and default admin is created"""
+    try:
+        from models import Admin
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables verified on startup event!", flush=True)
+        
+        # Ensure default admin exists
+        db = SessionLocal()
+        try:
+            default_admin = db.query(Admin).filter(Admin.name == "Sohaib").first()
+            if not default_admin:
+                print("📝 Creating default admin user on startup...", flush=True)
+                admin = Admin(name="Sohaib", password="123456")
+                db.add(admin)
+                db.commit()
+                print("✅ Default admin created on startup", flush=True)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"⚠️ Database startup check warning: {e}", flush=True)
 
 # ✅ FIXED: Proper CORS setup for both local + production
 # CORS middleware must be added BEFORE routers to handle OPTIONS preflight requests
