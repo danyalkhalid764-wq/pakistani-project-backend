@@ -44,9 +44,12 @@ from moviepy.editor import ImageClip, concatenate_videoclips, CompositeVideoClip
 router = APIRouter()
 
 # Simple: Save videos to disk (Railway allows writes to app directory)
-videos_dir = os.path.join(os.path.dirname(__file__), "..", "generated_videos")
+# Use absolute path that matches main.py - ensure consistency
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+videos_dir = os.path.join(backend_dir, "generated_videos")
+videos_dir = os.path.abspath(videos_dir)  # Ensure absolute path
 os.makedirs(videos_dir, exist_ok=True)
-print(f"📁 Video storage directory: {os.path.abspath(videos_dir)}", flush=True)
+print(f"📁 Video storage directory (video.py): {videos_dir}", flush=True)
 
 
 def ensure_even_dimensions(width, height):
@@ -305,12 +308,37 @@ async def create_slideshow_video(
             
             # Save video to disk (SIMPLE - no cache, just disk)
             disk_path = os.path.join(videos_dir, filename)
+            disk_path = os.path.abspath(disk_path)  # Ensure absolute path
+            print(f"💾 [VIDEO SAVE] Attempting to save video:", flush=True)
+            print(f"   Filename: {filename}", flush=True)
+            print(f"   Videos directory: {videos_dir}", flush=True)
+            print(f"   Full disk path: {disk_path}", flush=True)
+            print(f"   Video size: {len(video_bytes)} bytes", flush=True)
+            print(f"   Directory exists: {os.path.exists(videos_dir)}", flush=True)
+            print(f"   Directory is writable: {os.access(videos_dir, os.W_OK) if os.path.exists(videos_dir) else 'N/A'}", flush=True)
+            
             try:
+                # Ensure directory exists
+                os.makedirs(videos_dir, exist_ok=True)
+                
                 with open(disk_path, 'wb') as f:
                     f.write(video_bytes)
-                print(f"✅ Video saved to disk: {disk_path} ({len(video_bytes)} bytes)", flush=True)
+                
+                # Verify file was saved
+                if os.path.exists(disk_path):
+                    saved_size = os.path.getsize(disk_path)
+                    print(f"✅ Video saved to disk successfully:", flush=True)
+                    print(f"   Path: {disk_path}", flush=True)
+                    print(f"   Size: {saved_size} bytes", flush=True)
+                    print(f"   File exists: {os.path.exists(disk_path)}", flush=True)
+                else:
+                    print(f"❌ Video file not found after saving!", flush=True)
+                    raise Exception("File was not created after write operation")
+                    
             except Exception as disk_error:
                 print(f"❌ Could not save video to disk: {disk_error}", flush=True)
+                import traceback
+                traceback.print_exc()
                 raise HTTPException(status_code=500, detail=f"Failed to save video: {str(disk_error)}")
             
             # Persist GeneratedVideo record

@@ -229,9 +229,23 @@ app.include_router(video.router, prefix="/api/video", tags=["video"])
 
 # ✅ Static files for generated videos
 # Use app directory for generated_videos (writable location on Railway)
+# Use absolute path for consistency with video.py
 videos_dir = os.path.join(os.path.dirname(__file__), "generated_videos")
+videos_dir = os.path.abspath(videos_dir)  # Ensure absolute path
 os.makedirs(videos_dir, exist_ok=True)
-print(f"Video files directory: {os.path.abspath(videos_dir)}")
+print(f"📁 Video files directory (main.py): {videos_dir}", flush=True)
+
+# List existing files for debugging
+try:
+    if os.path.exists(videos_dir):
+        existing_files = os.listdir(videos_dir)
+        print(f"📹 Existing video files in directory: {len(existing_files)} files", flush=True)
+        if existing_files:
+            print(f"   Sample files (first 5): {existing_files[:5]}", flush=True)
+    else:
+        print(f"⚠️ Videos directory created but doesn't exist yet", flush=True)
+except Exception as e:
+    print(f"⚠️ Could not list video directory: {e}", flush=True)
 
 # Direct route handler to serve video files (more reliable than mount)
 from fastapi.responses import FileResponse, Response
@@ -356,11 +370,58 @@ async def serve_video(filename: str, request: Request):
             headers=headers
         )
     
+    # File not found - but still add CORS headers
     print(f"❌ Video not found: {filename}", flush=True)
     print(f"   Searched path: {file_path}", flush=True)
     print(f"   Videos directory: {videos_dir}", flush=True)
+    print(f"   Videos directory absolute: {os.path.abspath(videos_dir)}", flush=True)
+    
+    # List files in directory for debugging
+    try:
+        if os.path.exists(videos_dir):
+            files_in_dir = os.listdir(videos_dir)
+            print(f"   Files in directory ({len(files_in_dir)} files):", flush=True)
+            for f in files_in_dir[:10]:  # List first 10 files
+                file_full_path = os.path.join(videos_dir, f)
+                file_size = os.path.getsize(file_full_path) if os.path.isfile(file_full_path) else 0
+                print(f"      - {f} ({file_size} bytes)", flush=True)
+        else:
+            print(f"   ❌ Videos directory does not exist!", flush=True)
+    except Exception as e:
+        print(f"   ⚠️ Could not list directory: {e}", flush=True)
+    
+    # Get origin for CORS headers
+    origin = request.headers.get("origin", "")
+    referer = request.headers.get("referer", "")
+    
+    # Build error response with CORS headers
+    error_detail = f"Video file not found: {filename}"
+    
+    # Create response with CORS headers (JSONResponse already imported above)
+    headers = {}
+    if origin in cors_origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    elif referer:
+        # Try extracting from referer
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(referer)
+            extracted_origin = f"{parsed.scheme}://{parsed.netloc}"
+            if extracted_origin in cors_origins:
+                headers["Access-Control-Allow-Origin"] = extracted_origin
+                headers["Access-Control-Allow-Credentials"] = "true"
+        except Exception:
+            pass
+    
+    print(f"   CORS headers for 404: {headers}", flush=True)
     print("=" * 80, flush=True)
-    raise HTTPException(status_code=404, detail=f"Video file not found: {filename}")
+    
+    return JSONResponse(
+        status_code=404,
+        content={"detail": error_detail},
+        headers=headers
+    )
 
 @app.get("/")
 async def root():
