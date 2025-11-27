@@ -49,6 +49,21 @@ os.makedirs(videos_dir, exist_ok=True)
 print(f"📁 Video storage directory: {os.path.abspath(videos_dir)}", flush=True)
 
 
+def ensure_even_dimensions(width, height):
+    """
+    Ensure dimensions are even numbers (required for H.264 codec).
+    Rounds down to nearest even number to prevent upscaling.
+    """
+    width = int(width)
+    height = int(height)
+    # Round down to nearest even number
+    if width % 2 != 0:
+        width -= 1
+    if height % 2 != 0:
+        height -= 1
+    return width, height
+
+
 @router.post("/slideshow")
 async def create_slideshow_video(
     images: List[UploadFile] = File(..., description="2-3 image files"),
@@ -119,10 +134,13 @@ async def create_slideshow_video(
                 W = int(W * scale)
                 H = int(H * scale)
             
+            # 🔧 FIX: Ensure dimensions are even (required for H.264 codec)
+            W, H = ensure_even_dimensions(W, H)
+            
             dur = max(1, int(duration_seconds))
             clips = []
             
-            print(f"🎨 Canvas size: {W}x{H}", flush=True)
+            print(f"🎨 Canvas size: {W}x{H} (even dimensions for H.264)", flush=True)
             print(f"🎬 Slide effect: {slide_effect}, Transition: {transition}", flush=True)
 
             for idx, path in enumerate(saved_paths):
