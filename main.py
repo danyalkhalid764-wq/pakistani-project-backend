@@ -234,17 +234,33 @@ os.makedirs(videos_dir, exist_ok=True)
 print(f"Video files directory: {os.path.abspath(videos_dir)}")
 
 # Direct route handler to serve video files (more reliable than mount)
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi import HTTPException
+# Request is already imported above (line 179)
+
+@app.options("/static/videos/{filename}")
+async def serve_video_options(filename: str, request: Request):
+    """Handle OPTIONS preflight requests for video files with CORS"""
+    origin = request.headers.get("origin", "")
+    
+    if origin in cors_origins:
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "3600",
+            }
+        )
+    return Response(status_code=200)
 
 @app.get("/static/videos/{filename}")
-async def serve_video(filename: str):
+async def serve_video(filename: str, request: Request):
     """
-    SIMPLE: Serve video files directly from disk.
-    This is the ONLY way videos are served - no cache, no streaming complexity.
+    Serve video files directly from disk with CORS headers.
     """
-    from fastapi.responses import FileResponse
-    
     # Remove query parameters if present
     filename = filename.split('?')[0]
     file_path = os.path.join(videos_dir, filename)
@@ -253,14 +269,27 @@ async def serve_video(filename: str):
         file_size = os.path.getsize(file_path)
         print(f"✅ Serving video: {filename} ({file_size} bytes)", flush=True)
         
-        # Use FileResponse - FastAPI handles range requests automatically
+        # Get origin from request
+        origin = request.headers.get("origin", "")
+        
+        # Build headers with CORS support
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+        }
+        
+        # Add CORS headers if origin matches allowed origins
+        if origin in cors_origins:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
+            headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            headers["Access-Control-Allow-Headers"] = "*"
+            headers["Access-Control-Expose-Headers"] = "*"
+        
         return FileResponse(
             file_path,
             media_type="video/mp4",
-            headers={
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=3600",
-            }
+            headers=headers
         )
     
     print(f"❌ Video not found: {filename}", flush=True)
