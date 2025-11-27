@@ -242,18 +242,34 @@ from fastapi import HTTPException
 async def serve_video_options(filename: str, request: Request):
     """Handle OPTIONS preflight requests for video files with CORS"""
     origin = request.headers.get("origin", "")
+    referer = request.headers.get("referer", "")
+    user_agent = request.headers.get("user-agent", "")[:100]  # Truncate for logging
+    
+    print("=" * 80, flush=True)
+    print(f"🔍 [CORS DEBUG] OPTIONS request for video: {filename}", flush=True)
+    print(f"   Origin: {origin}", flush=True)
+    print(f"   Referer: {referer}", flush=True)
+    print(f"   User-Agent: {user_agent}", flush=True)
+    print(f"   Allowed origins: {cors_origins}", flush=True)
+    print(f"   Origin in allowed list: {origin in cors_origins}", flush=True)
+    print(f"   All request headers: {dict(request.headers)}", flush=True)
     
     if origin in cors_origins:
-        return Response(
-            status_code=200,
-            headers={
-                "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age": "3600",
-            }
-        )
+        headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "3600",
+        }
+        print(f"✅ [CORS DEBUG] Sending CORS headers for OPTIONS:", flush=True)
+        for key, value in headers.items():
+            print(f"   {key}: {value}", flush=True)
+        print("=" * 80, flush=True)
+        return Response(status_code=200, headers=headers)
+    
+    print(f"⚠️ [CORS DEBUG] Origin not in allowed list - returning 200 without CORS headers", flush=True)
+    print("=" * 80, flush=True)
     return Response(status_code=200)
 
 @app.get("/static/videos/{filename}")
@@ -262,15 +278,35 @@ async def serve_video(filename: str, request: Request):
     Serve video files directly from disk with CORS headers.
     """
     # Remove query parameters if present
+    original_filename = filename
     filename = filename.split('?')[0]
     file_path = os.path.join(videos_dir, filename)
     
+    # Get all request headers for debugging
+    origin = request.headers.get("origin", "")
+    referer = request.headers.get("referer", "")
+    host = request.headers.get("host", "")
+    user_agent = request.headers.get("user-agent", "")[:100]  # Truncate for logging
+    all_headers = dict(request.headers)
+    
+    print("=" * 80, flush=True)
+    print(f"🎬 [CORS DEBUG] GET request for video: {original_filename}", flush=True)
+    print(f"   Cleaned filename: {filename}", flush=True)
+    print(f"   File path: {file_path}", flush=True)
+    print(f"   File exists: {os.path.exists(file_path)}", flush=True)
+    print(f"   Origin header: '{origin}'", flush=True)
+    print(f"   Referer header: '{referer}'", flush=True)
+    print(f"   Host header: '{host}'", flush=True)
+    print(f"   User-Agent: {user_agent}", flush=True)
+    print(f"   Allowed origins: {cors_origins}", flush=True)
+    print(f"   Origin in allowed list: {origin in cors_origins}", flush=True)
+    print(f"   All request headers:", flush=True)
+    for key, value in all_headers.items():
+        print(f"      {key}: {value}", flush=True)
+    
     if os.path.exists(file_path) and os.path.isfile(file_path):
         file_size = os.path.getsize(file_path)
-        print(f"✅ Serving video: {filename} ({file_size} bytes)", flush=True)
-        
-        # Get origin from request
-        origin = request.headers.get("origin", "")
+        print(f"✅ File found - size: {file_size} bytes", flush=True)
         
         # Build headers with CORS support
         headers = {
@@ -285,7 +321,35 @@ async def serve_video(filename: str, request: Request):
             headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
             headers["Access-Control-Allow-Headers"] = "*"
             headers["Access-Control-Expose-Headers"] = "*"
+            print(f"✅ [CORS DEBUG] Adding CORS headers:", flush=True)
+            for key, value in headers.items():
+                print(f"   {key}: {value}", flush=True)
+        else:
+            # Try to extract origin from referer if origin header is missing
+            if not origin and referer:
+                print(f"⚠️ [CORS DEBUG] No origin header, trying to extract from referer: {referer}", flush=True)
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(referer)
+                    extracted_origin = f"{parsed.scheme}://{parsed.netloc}"
+                    print(f"   Extracted origin: {extracted_origin}", flush=True)
+                    if extracted_origin in cors_origins:
+                        headers["Access-Control-Allow-Origin"] = extracted_origin
+                        headers["Access-Control-Allow-Credentials"] = "true"
+                        headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+                        headers["Access-Control-Allow-Headers"] = "*"
+                        headers["Access-Control-Expose-Headers"] = "*"
+                        print(f"✅ [CORS DEBUG] Added CORS headers using extracted origin:", flush=True)
+                        for key, value in headers.items():
+                            if key.startswith("Access-Control"):
+                                print(f"   {key}: {value}", flush=True)
+                except Exception as e:
+                    print(f"❌ [CORS DEBUG] Failed to extract origin from referer: {e}", flush=True)
+            else:
+                print(f"⚠️ [CORS DEBUG] Origin '{origin}' not in allowed list - NOT adding CORS headers", flush=True)
+                print(f"   This may cause CORS errors in the browser", flush=True)
         
+        print("=" * 80, flush=True)
         return FileResponse(
             file_path,
             media_type="video/mp4",
@@ -293,6 +357,9 @@ async def serve_video(filename: str, request: Request):
         )
     
     print(f"❌ Video not found: {filename}", flush=True)
+    print(f"   Searched path: {file_path}", flush=True)
+    print(f"   Videos directory: {videos_dir}", flush=True)
+    print("=" * 80, flush=True)
     raise HTTPException(status_code=404, detail=f"Video file not found: {filename}")
 
 @app.get("/")
