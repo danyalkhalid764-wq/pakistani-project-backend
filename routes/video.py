@@ -352,14 +352,27 @@ async def create_slideshow_video(
             # Return simple static URL
             from config import settings
             backend_url = os.getenv("BACKEND_URL", settings.BACKEND_URL)
-            if backend_url and not backend_url.startswith("http://localhost"):
+            
+            # Clean and validate backend_url
+            if backend_url:
+                backend_url = backend_url.strip()
+                # Remove trailing slash if present
+                backend_url = backend_url.rstrip('/')
+            
+            # Determine if we're in production (not localhost)
+            is_production = backend_url and backend_url.strip() and not backend_url.startswith("http://localhost")
+            
+            if is_production:
                 # Production: return full URL
                 video_url = f"{backend_url}/static/videos/{filename}"
+                print(f"🔗 [URL CONSTRUCTION] Production mode - using BACKEND_URL: {backend_url}", flush=True)
             else:
                 # Local dev: return relative URL
                 video_url = f"/static/videos/{filename}"
-
+                print(f"🔗 [URL CONSTRUCTION] Local dev mode - using relative URL", flush=True)
+            
             print(f"✅ Video generated successfully: {filename}", flush=True)
+            print(f"📹 Video URL returned to frontend: {video_url}", flush=True)
             return {
                 "success": True,
                 "message": "Slideshow video generated successfully.",
