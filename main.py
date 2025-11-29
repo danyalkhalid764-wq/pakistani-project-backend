@@ -339,7 +339,8 @@ async def serve_video(filename: str, request: Request):
             for key, value in headers.items():
                 print(f"   {key}: {value}", flush=True)
         else:
-            # Try to extract origin from referer if origin header is missing
+            # Try to extract origin from referer if origin header is missing or doesn't match
+            origin_to_check = origin
             if not origin and referer:
                 print(f"⚠️ [CORS DEBUG] No origin header, trying to extract from referer: {referer}", flush=True)
                 try:
@@ -348,6 +349,7 @@ async def serve_video(filename: str, request: Request):
                     extracted_origin = f"{parsed.scheme}://{parsed.netloc}"
                     print(f"   Extracted origin: {extracted_origin}", flush=True)
                     if extracted_origin in cors_origins:
+                        origin_to_check = extracted_origin
                         headers["Access-Control-Allow-Origin"] = extracted_origin
                         headers["Access-Control-Allow-Credentials"] = "true"
                         headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -359,8 +361,34 @@ async def serve_video(filename: str, request: Request):
                                 print(f"   {key}: {value}", flush=True)
                 except Exception as e:
                     print(f"❌ [CORS DEBUG] Failed to extract origin from referer: {e}", flush=True)
-            else:
+            
+            # If still no CORS headers and we have an origin, try one more time with referer
+            if "Access-Control-Allow-Origin" not in headers and referer:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(referer)
+                    extracted_origin = f"{parsed.scheme}://{parsed.netloc}"
+                    # Check if any allowed origin matches the domain (more permissive)
+                    for allowed_origin in cors_origins:
+                        if allowed_origin != "*":
+                            try:
+                                allowed_parsed = urlparse(allowed_origin)
+                                if allowed_parsed.netloc == parsed.netloc:
+                                    headers["Access-Control-Allow-Origin"] = extracted_origin
+                                    headers["Access-Control-Allow-Credentials"] = "true"
+                                    headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+                                    headers["Access-Control-Allow-Headers"] = "*"
+                                    headers["Access-Control-Expose-Headers"] = "*"
+                                    print(f"✅ [CORS DEBUG] Added CORS headers - domain match found", flush=True)
+                                    break
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"❌ [CORS DEBUG] Failed to match domain: {e}", flush=True)
+            
+            if "Access-Control-Allow-Origin" not in headers:
                 print(f"⚠️ [CORS DEBUG] Origin '{origin}' not in allowed list - NOT adding CORS headers", flush=True)
+                print(f"   Allowed origins: {cors_origins}", flush=True)
                 print(f"   This may cause CORS errors in the browser", flush=True)
         
         print("=" * 80, flush=True)
